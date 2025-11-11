@@ -1,7 +1,3 @@
-Here’s your **RamPay README** rewritten without triple backticks — so it’ll paste perfectly into GitHub or Notion without formatting breaks:
-
----
-
 # 💳 RamPay — Cloud-Native Payments Platform
 
 **RamPay** (Rapid Access Money Platform) is a scalable, event-driven payments and payouts system built for cloud-native environments.
