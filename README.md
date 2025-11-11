@@ -19,6 +19,7 @@ It combines **microservices**, **real-time event streaming**, and **machine lear
 
 ## 🏗️ Architecture Overview
 
+```
 Frontend (React)
 ↓
 API Gateway (Spring Boot)
@@ -31,11 +32,11 @@ Event Bus (Kafka / SNS-SQS)
 Datastores: PostgreSQL, Redis
 Infra: Docker, Terraform, AWS
 Monitoring: Prometheus + Grafana
-
+```
 ---
 
 ## 📦 Tech Stack
-
+```
 | Layer          | Tools                                 |
 | -------------- | ------------------------------------- |
 | **Backend**    | Java 17, Spring Boot, Spring Data JPA |
@@ -46,7 +47,7 @@ Monitoring: Prometheus + Grafana
 | **CI/CD**      | GitHub Actions                        |
 | **Monitoring** | Prometheus, Grafana, CloudWatch       |
 | **Auth**       | JWT / OAuth2                          |
-
+```
 ---
 
 ## ⚙️ Local Setup
@@ -69,7 +70,7 @@ Visit: [http://localhost:8080/health](http://localhost:8080/health)
 ---
 
 ## 📘 Folder Structure
-
+```
 RamPay/
 ├── docs/
 │   ├── architecture.md
@@ -87,18 +88,18 @@ RamPay/
 │   └── workflows/
 │       └── ci.yml
 └── README.md
-
+```
 ---
 
 ## 📅 Development Roadmap
-
+```
 | Week   | Milestone                   | Description                              |
 | ------ | --------------------------- | ---------------------------------------- |
 | Week 1 | Core API + Postgres + Redis | Base payment service working locally     |
 | Week 2 | Kafka + Event System        | Emit and consume `PaymentCreated` events |
 | Week 3 | ML Fraud Detection Service  | Deploy Python model microservice         |
 | Week 4 | AWS Deployment + Monitoring | Terraform infra + CI/CD pipelines        |
-
+```
 ---
 
 ## 🧠 Key Learning Areas
