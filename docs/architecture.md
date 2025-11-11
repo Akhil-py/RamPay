@@ -52,7 +52,7 @@ The system uses microservices communicating through an event bus (Kafka or AWS S
 4. Notification Service sends updates to user.  
 5. Analytics Service logs every event for metrics.  
 
-
+```mermaid
 flowchart LR
   %% Clients
   subgraph Client
@@ -119,7 +119,7 @@ flowchart LR
   T --> Data
   T --> Infra
   M --> CW
-
+```
 
 ---
 
