@@ -1,0 +1,19 @@
+name: RamPay CI (Placeholder)
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+
+jobs:
+  verify-repo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Verify structure
+        run: |
+          echo "✅ Repo structure OK"
+          ls -R
