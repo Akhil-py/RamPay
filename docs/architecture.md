@@ -52,6 +52,75 @@ The system uses microservices communicating through an event bus (Kafka or AWS S
 4. Notification Service sends updates to user.  
 5. Analytics Service logs every event for metrics.  
 
+
+flowchart LR
+  %% Clients
+  subgraph Client
+    U[User / Frontend (React)]
+  end
+
+  %% API Layer
+  subgraph API[API Layer]
+    G[API Gateway<br/>Spring Boot]
+  end
+
+  %% Event Bus
+  subgraph Bus[Event Bus]
+    K[(Kafka / AWS SNS/SQS)]
+  end
+
+  %% Backend Services
+  subgraph Srv[Backend Services]
+    P[Payment Service]
+    F[Fraud Detection Service]
+    N[Notification Service]
+    A[Analytics Service]
+  end
+
+  %% Data Stores
+  subgraph Data[Data Stores]
+    PG[(PostgreSQL)]
+    R[(Redis Cache)]
+  end
+
+  %% Infra & Monitoring
+  subgraph Infra[Infra & Monitoring]
+    T[Terraform / IaC]
+    M[Prometheus / Grafana]
+    CW[CloudWatch]
+  end
+
+  %% Flows
+  U -->|REST| G
+  G -->|REST/gRPC| P
+
+  P --> PG
+  P --> R
+
+  P -->|publish events| K
+  K -->|consume events| F
+  K -->|consume events| N
+  K -->|consume events| A
+
+  F --> PG
+  F -->|AnomalyDetected| K
+
+  N -->|email/SMS| U
+
+  A --> PG
+
+  P --> M
+  F --> M
+  N --> M
+  A --> M
+
+  T --> API
+  T --> Srv
+  T --> Data
+  T --> Infra
+  M --> CW
+
+
 ---
 
 ## 5. Deployment Topology
