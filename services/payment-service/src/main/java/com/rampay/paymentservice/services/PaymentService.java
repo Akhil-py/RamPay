@@ -2,19 +2,19 @@ package com.rampay.paymentservice.services;
 
 import com.rampay.paymentservice.dto.CreatePaymentRequest;
 import com.rampay.paymentservice.dto.PaymentMapper;
-import com.rampay.paymentservice.dto.PaymentResponse;
 import com.rampay.paymentservice.exceptions.*;
-import com.rampay.paymentservice.models.*;
+import com.rampay.paymentservice.models.Payment;
+import com.rampay.paymentservice.models.PaymentStatus;
 import com.rampay.paymentservice.repositories.PaymentRepository;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @Service
 public class PaymentService {
@@ -34,16 +34,22 @@ public class PaymentService {
     public Payment createPayment(CreatePaymentRequest request, String idempotencyKey) {
         // Check idempotency if key provided
         if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            UUID existingPaymentId = redisCacheService.checkIdempotency(idempotencyKey);
+            String existingPaymentId = redisCacheService.checkIdempotency(idempotencyKey);
             if (existingPaymentId != null) {
-                Payment existing = paymentRepository.findById(existingPaymentId)
-                        .orElseThrow(() -> new PaymentNotFoundException("Payment not found with id: " + existingPaymentId));
+                paymentRepository.findById(existingPaymentId)
+                        .orElseThrow(() -> new PaymentNotFoundException(
+                                "Payment not found with id: " + existingPaymentId));
                 throw new DuplicatePaymentException("Payment already processed with this idempotency key");
             }
         }
 
         Payment payment = PaymentMapper.toEntity(request);
+        payment.setId(UUID.randomUUID().toString());
         payment.setIdempotencyKey(idempotencyKey);
+        String now = Instant.now().toString();
+        payment.setCreatedAt(now);
+        payment.setUpdatedAt(now);
+
         Payment saved = paymentRepository.save(payment);
         redisCacheService.cachePayment(saved);
 
@@ -57,7 +63,7 @@ public class PaymentService {
                 saved.getId(),
                 saved.getFromAccountId(),
                 saved.getToAccountId(),
-                saved.getAmount(),
+                new BigDecimal(saved.getAmount()),
                 saved.getCurrency()
         );
 
@@ -65,17 +71,21 @@ public class PaymentService {
     }
 
     public Page<Payment> getAllPayments(int page, int size) {
-        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
-        return paymentRepository.findAll(pageable);
+        int effectiveSize = Math.min(size, 100);
+        // DynamoDB does not support offset-based pagination natively;
+        // page 0 returns first effectiveSize items via scan.
+        List<Payment> results = paymentRepository.scan(effectiveSize);
+        return new PageImpl<>(results, PageRequest.of(page, effectiveSize), results.size());
     }
 
     public Payment getPayment(UUID id) {
+        String idStr = id.toString();
         // Try Redis first
-        Payment cached = redisCacheService.getPayment(id);
+        Payment cached = redisCacheService.getPayment(idStr);
         if (cached != null) return cached;
 
         // Fallback to DB
-        Payment payment = paymentRepository.findById(id).orElse(null);
+        Payment payment = paymentRepository.findById(idStr).orElse(null);
         if (payment == null) {
             throw new PaymentNotFoundException("Payment not found with id: " + id);
         }
@@ -85,14 +95,15 @@ public class PaymentService {
 
     public Payment approvePayment(UUID id) {
         Payment payment = getPaymentOrThrow(id);
-        if (payment.getStatus() != PaymentStatus.PENDING) {
-            throw new InvalidPaymentStatusException("Cannot approve payment with status: " + payment.getStatus());
+        if (!PaymentStatus.PENDING.name().equals(payment.getStatus())) {
+            throw new InvalidPaymentStatusException(
+                    "Cannot approve payment with status: " + payment.getStatus());
         }
-        payment.setStatus(PaymentStatus.APPROVED);
+        payment.setStatus(PaymentStatus.APPROVED.name());
+        payment.setUpdatedAt(Instant.now().toString());
         Payment saved = paymentRepository.save(payment);
         redisCacheService.cachePayment(saved);
 
-        // Publish event
         eventPublisherService.publishPaymentApproved(saved.getId());
 
         return saved;
@@ -100,15 +111,16 @@ public class PaymentService {
 
     public Payment failPayment(UUID id, String reason) {
         Payment payment = getPaymentOrThrow(id);
-        if (payment.getStatus() != PaymentStatus.PENDING) {
-            throw new InvalidPaymentStatusException("Cannot fail payment with status: " + payment.getStatus());
+        if (!PaymentStatus.PENDING.name().equals(payment.getStatus())) {
+            throw new InvalidPaymentStatusException(
+                    "Cannot fail payment with status: " + payment.getStatus());
         }
-        payment.setStatus(PaymentStatus.FAILED);
+        payment.setStatus(PaymentStatus.FAILED.name());
         payment.setFailureReason(reason);
+        payment.setUpdatedAt(Instant.now().toString());
         Payment saved = paymentRepository.save(payment);
         redisCacheService.cachePayment(saved);
 
-        // Publish event
         eventPublisherService.publishPaymentFailed(saved.getId(), reason);
 
         return saved;
@@ -116,35 +128,40 @@ public class PaymentService {
 
     public Payment refundPayment(UUID id, BigDecimal refundAmount) {
         Payment payment = getPaymentOrThrow(id);
-        if (payment.getStatus() != PaymentStatus.APPROVED) {
-            throw new InvalidPaymentStatusException("Cannot refund payment with status: " + payment.getStatus());
+        if (!PaymentStatus.APPROVED.name().equals(payment.getStatus())) {
+            throw new InvalidPaymentStatusException(
+                    "Cannot refund payment with status: " + payment.getStatus());
         }
-        if (refundAmount.compareTo(payment.getAmount()) > 0) {
+        BigDecimal originalAmount = new BigDecimal(payment.getAmount());
+        if (refundAmount.compareTo(originalAmount) > 0) {
             throw new InvalidPaymentAmountException("Refund amount cannot exceed original amount");
         }
-        payment.setStatus(PaymentStatus.REFUNDED);
-        payment.setRefundAmount(refundAmount);
+        payment.setStatus(PaymentStatus.REFUNDED.name());
+        payment.setRefundAmount(refundAmount.toPlainString());
+        payment.setUpdatedAt(Instant.now().toString());
         Payment saved = paymentRepository.save(payment);
         redisCacheService.cachePayment(saved);
 
-        // Publish event
         eventPublisherService.publishPaymentRefunded(saved.getId(), refundAmount);
 
         return saved;
     }
 
     public Page<Payment> getPaymentsByAccount(UUID accountId, int page, int size) {
-        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
-        return paymentRepository.findByFromAccountId(accountId, pageable);
+        int effectiveSize = Math.min(size, 100);
+        List<Payment> results = paymentRepository.findByFromAccountId(
+                accountId.toString(), effectiveSize, null);
+        return new PageImpl<>(results, PageRequest.of(page, effectiveSize), results.size());
     }
 
     public Page<Payment> getPaymentsByStatus(PaymentStatus status, int page, int size) {
-        Pageable pageable = PageRequest.of(page, Math.min(size, 100));
-        return paymentRepository.findByStatus(status, pageable);
+        int effectiveSize = Math.min(size, 100);
+        List<Payment> results = paymentRepository.findByStatus(status, effectiveSize, null);
+        return new PageImpl<>(results, PageRequest.of(page, effectiveSize), results.size());
     }
 
     private Payment getPaymentOrThrow(UUID id) {
-        Payment payment = getPayment(id);
+        Payment payment = paymentRepository.findById(id.toString()).orElse(null);
         if (payment == null) {
             throw new PaymentNotFoundException("Payment not found with id: " + id);
         }

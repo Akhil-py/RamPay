@@ -3,23 +3,11 @@ spring:
     name: payment-service
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
-  datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/rampaydb}
-    username: ${DB_USERNAME:rampay}
-    password: ${DB_PASSWORD:rampay}
-    driver-class-name: org.postgresql.Driver
   data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
-  jpa:
-    hibernate:
-      ddl-auto: ${JPA_DDL_AUTO:update}
-    show-sql: ${JPA_SHOW_SQL:false}
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     producer:
@@ -36,6 +24,15 @@ spring:
       enable-auto-commit: false
       isolation-level: read_committed
       max-poll-interval-ms: 300000
+
+aws:
+  region: ${AWS_REGION:us-east-1}
+  dynamodb:
+    endpoint: ${DYNAMODB_ENDPOINT:http://localhost:8000}
+    local: ${DYNAMODB_LOCAL:true}
+    tables:
+      payments: ${DYNAMODB_TABLE_PAYMENTS:Payments}
+      outbox: ${DYNAMODB_TABLE_OUTBOX:PaymentOutbox}
 
 server:
   port: ${SERVER_PORT:8080}
@@ -68,11 +65,9 @@ management:
     export:
       prometheus:
         enabled: true
-
-opentelemetry:
-  traces:
-    exporter: otlp
-    otlp:
-      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4317}
-    sampler:
+  tracing:
+    sampling:
       probability: 1.0
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4317}

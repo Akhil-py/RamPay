@@ -1,17 +1,19 @@
 version: "3.9"
 
 services:
-  postgres:
-    image: postgres:16
-    container_name: rampay-postgres
-    environment:
-      POSTGRES_USER: rampay
-      POSTGRES_PASSWORD: rampay
-      POSTGRES_DB: rampaydb
+  dynamodb-local:
+    image: amazon/dynamodb-local:2.3.0
+    container_name: rampay-dynamodb-local
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-dbPath", "/data"]
     ports:
-      - "5432:5432"
+      - "8000:8000"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - dynamodata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7
@@ -57,17 +59,22 @@ services:
     ports:
       - "8080:8080"
     environment:
-      DB_URL: jdbc:postgresql://postgres:5432/rampaydb
-      DB_USERNAME: rampay
-      DB_PASSWORD: rampay
+      AWS_REGION: us-east-1
+      DYNAMODB_ENDPOINT: http://dynamodb-local:8000
+      DYNAMODB_LOCAL: "true"
+      DYNAMODB_TABLE_PAYMENTS: Payments
+      DYNAMODB_TABLE_OUTBOX: PaymentOutbox
       REDIS_HOST: redis
       REDIS_PORT: 6379
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       SERVER_PORT: 8080
     depends_on:
-      - postgres
-      - redis
-      - kafka
+      dynamodb-local:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_started
 
 volumes:
-  pgdata:
+  dynamodata:
