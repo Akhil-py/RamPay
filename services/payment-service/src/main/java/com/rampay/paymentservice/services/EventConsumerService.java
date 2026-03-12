@@ -21,13 +21,14 @@ public class EventConsumerService {
 
     @KafkaListener(topics = "anomaly-detected", groupId = "payment-service-group")
     public void consumeAnomalyDetected(String message) {
+        AnomalyDetectedEvent event;
         try {
-            AnomalyDetectedEvent event = objectMapper.readValue(message, AnomalyDetectedEvent.class);
-            logger.info("Received AnomalyDetected event for paymentId: {}, riskScore: {}",
-                    event.getPaymentId(), event.getRiskScore());
-            paymentService.failPayment(event.getPaymentId(), "Flagged by fraud service");
+            event = objectMapper.readValue(message, AnomalyDetectedEvent.class);
         } catch (Exception e) {
-            logger.error("Failed to process AnomalyDetected event: {}", message, e);
+            throw new RuntimeException("Failed to deserialize AnomalyDetected event: " + message, e);
         }
+        logger.info("Received AnomalyDetected event for paymentId: {}, riskScore: {}",
+                event.getPaymentId(), event.getRiskScore());
+        paymentService.failPayment(event.getPaymentId(), "Flagged by fraud service");
     }
 }
