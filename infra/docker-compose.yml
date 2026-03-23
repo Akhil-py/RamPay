@@ -76,5 +76,24 @@ services:
       kafka:
         condition: service_started
 
+  fraud-service:
+    build:
+      context: ../services/fraud-service
+      dockerfile: Dockerfile
+    container_name: rampay-fraud-service
+    ports:
+      - "8001:8001"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+    depends_on:
+      kafka:
+        condition: service_started
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
 volumes:
   dynamodata:
