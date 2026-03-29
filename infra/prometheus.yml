@@ -1,0 +1,14 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'payment-service'
+    static_configs:
+      - targets: ['payment-service:8080']
+    metrics_path: '/actuator/prometheus'
+
+  - job_name: 'fraud-service'
+    static_configs:
+      - targets: ['fraud-service:8001']
+    metrics_path: '/metrics'
