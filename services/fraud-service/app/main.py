@@ -1,3 +1,4 @@
+import logging
 import threading
 from contextlib import asynccontextmanager
 
@@ -12,6 +13,19 @@ from app.metrics import (  # noqa: F401 — imported to ensure counters are regi
     fraud_evaluation_duration_seconds,
     payments_evaluated_total,
     redis_errors_total,
+)
+
+logging.basicConfig(format="%(message)s", level=logging.INFO)
+structlog.configure(
+    processors=[
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.JSONRenderer(),
+    ],
+    wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+    context_class=dict,
+    logger_factory=structlog.PrintLoggerFactory(),
 )
 
 logger = structlog.get_logger(__name__)

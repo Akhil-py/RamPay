@@ -7,9 +7,11 @@ engine, and publishes ``anomaly-detected`` events for HIGH_RISK payments.
 Designed to run as a daemon thread started from the FastAPI lifespan.
 """
 
+import datetime
 import json
 import os
 import threading
+import uuid
 
 from confluent_kafka import Consumer, KafkaError, KafkaException
 import structlog
@@ -22,8 +24,6 @@ from app.metrics import (
     payments_evaluated_total,
 )
 from app.models import AnomalyDetectedEvent, PaymentCreatedEvent
-
-import datetime
 
 logger = structlog.get_logger(__name__)
 
@@ -96,6 +96,22 @@ def start_consumer() -> None:
                 consumer.commit(message=msg)
                 continue
 
+            # --- Bind context vars for structured logging ---
+            headers = msg.headers() or []
+            correlation_id_bytes = next(
+                (v for k, v in headers if k == "correlationId"), None
+            )
+            correlation_id = (
+                correlation_id_bytes.decode("utf-8")
+                if correlation_id_bytes is not None
+                else str(uuid.uuid4())
+            )
+            structlog.contextvars.bind_contextvars(
+                payment_id=str(event.paymentId),
+                from_account=str(event.fromAccountId),
+                correlation_id=correlation_id,
+            )
+
             # --- Evaluate ---
             try:
                 decision = fraud_engine.evaluate(event)
@@ -105,6 +121,7 @@ def start_consumer() -> None:
                     payment_id=event.paymentId,
                     error=str(exc),
                 )
+                structlog.contextvars.clear_contextvars()
                 consumer.commit(message=msg)
                 continue
 
@@ -142,7 +159,8 @@ def start_consumer() -> None:
                     evaluation_ms=decision.evaluation_ms,
                 )
 
-            # --- Commit offset only after successful processing ---
+            # --- Clear context vars and commit offset ---
+            structlog.contextvars.clear_contextvars()
             consumer.commit(message=msg)
 
     except KafkaException as exc:

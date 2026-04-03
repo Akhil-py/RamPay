@@ -5,13 +5,17 @@ import com.rampay.paymentservice.events.*;
 import com.rampay.paymentservice.models.OutboxEvent;
 import com.rampay.paymentservice.models.OutboxStatus;
 import com.rampay.paymentservice.repositories.OutboxRepository;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.header.internals.RecordHeader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -101,7 +105,14 @@ public class EventPublisherService {
                 String aggregateId = event.getAggregateId();
 
                 kafkaTemplate.executeInTransaction(ops -> {
-                    ops.send(topic, aggregateId, event.getPayload());
+                    String correlationId = MDC.get("correlationId") != null
+                            ? MDC.get("correlationId")
+                            : UUID.randomUUID().toString();
+                    ProducerRecord<String, String> record = new ProducerRecord<>(topic, null, aggregateId,
+                            event.getPayload(),
+                            java.util.List.of(new RecordHeader("correlationId",
+                                    correlationId.getBytes(StandardCharsets.UTF_8))));
+                    ops.send(record);
                     return null;
                 });
 
