@@ -1,0 +1,30 @@
+# IDE / editor
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build output
+target/
+build/
+*.class
+*.jar
+
+# Environment / secrets
+*.env.local
+*.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Node
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
