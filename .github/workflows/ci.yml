@@ -6,9 +6,52 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  AWS_REGION: us-east-1
+
 jobs:
-  build-and-test:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Payment Service — Java/Spring Boot
+  # ─────────────────────────────────────────────────────────────────────────────
+  payment-service:
+    name: Payment Service — Build & Test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      dynamodb-local:
+        image: amazon/dynamodb-local:2.3.0
+        ports:
+          - 8000:8000
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+      kafka:
+        image: apache/kafka:3.7.0
+        ports:
+          - 9092:9092
+        env:
+          KAFKA_NODE_ID: 1
+          KAFKA_PROCESS_ROLES: broker,controller
+          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+          KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+          KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+          CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+
     defaults:
       run:
         working-directory: services/payment-service
@@ -16,18 +59,123 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: temurin
           cache: maven
 
+      - name: Wait for Kafka
+        run: |
+          echo "Waiting for Kafka to be ready..."
+          for i in $(seq 1 60); do
+            if nc -z localhost 9092 2>/dev/null; then
+              echo "Kafka ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Kafka did not become ready in time" && exit 1
+
       - name: Build
-        run: ./mvnw clean package -DskipTests -Dmaven.compiler.source=17 -Dmaven.compiler.target=17
+        run: ./mvnw clean package -DskipTests
 
       - name: Test
-        run: ./mvnw test -Dmaven.compiler.source=17 -Dmaven.compiler.target=17
+        run: ./mvnw test -Dspring.profiles.active=test
+        env:
+          DYNAMODB_ENDPOINT: http://localhost:8000
+          DYNAMODB_LOCAL: "true"
+          DYNAMODB_TABLE_PAYMENTS: PaymentsTest
+          DYNAMODB_TABLE_OUTBOX: PaymentOutboxTest
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: payment-service-test-results
+          path: services/payment-service/target/surefire-reports/
+          retention-days: 7
 
       - name: Build Docker image
-        run: docker build -t rampay-payment-service:ci .
+        run: docker build -t rampay/payment-service:${{ github.sha }} .
+
+      - name: Push to ECR
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+        run: |
+          if [ -z "$AWS_ACCESS_KEY_ID" ]; then
+            echo "AWS_ACCESS_KEY_ID not set — skipping ECR push."
+            echo "Add AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and ECR_REGISTRY"
+            echo "as repository secrets to enable automatic ECR pushes."
+            exit 0
+          fi
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+          docker tag rampay/payment-service:${{ github.sha }} \
+            "$ECR_REGISTRY/rampay/payment-service:${{ github.sha }}"
+          docker tag rampay/payment-service:${{ github.sha }} \
+            "$ECR_REGISTRY/rampay/payment-service:latest"
+          docker push "$ECR_REGISTRY/rampay/payment-service:${{ github.sha }}"
+          docker push "$ECR_REGISTRY/rampay/payment-service:latest"
+          echo "Pushed payment-service:${{ github.sha }} and :latest to ECR"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Fraud Service — Python/FastAPI
+  # ─────────────────────────────────────────────────────────────────────────────
+  fraud-service:
+    name: Fraud Service — Lint & Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: services/fraud-service
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: services/fraud-service/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint (ruff)
+        run: |
+          pip install ruff==0.6.9
+          ruff check app/ --select=E,F,W --ignore=E501
+
+      - name: Build Docker image
+        run: docker build -t rampay/fraud-service:${{ github.sha }} .
+
+      - name: Push to ECR
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+        run: |
+          if [ -z "$AWS_ACCESS_KEY_ID" ]; then
+            echo "AWS_ACCESS_KEY_ID not set — skipping ECR push."
+            exit 0
+          fi
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+          docker tag rampay/fraud-service:${{ github.sha }} \
+            "$ECR_REGISTRY/rampay/fraud-service:${{ github.sha }}"
+          docker tag rampay/fraud-service:${{ github.sha }} \
+            "$ECR_REGISTRY/rampay/fraud-service:latest"
+          docker push "$ECR_REGISTRY/rampay/fraud-service:${{ github.sha }}"
+          docker push "$ECR_REGISTRY/rampay/fraud-service:latest"
+          echo "Pushed fraud-service:${{ github.sha }} and :latest to ECR"
